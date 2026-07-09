@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Linux Debug RegardeMoiCa (GDB)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/regardemoica",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,           // avoid “hanging” on a missing console
+      "console": "integratedTerminal",    // show program I/O in VS Code terminal
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",   // adjust if needed
+      "setupCommands": [
+        { "description": "Enable pretty printing", "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ],
+      "preLaunchTask": "Build RegardeMoiCa (Debug)"
+    },
+  ],
+}
