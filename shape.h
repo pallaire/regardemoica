@@ -29,7 +29,7 @@ struct Shape {
     char*   text;
 
     // Callbacks function pointers
-    void (*on_draw)(Shape* self, cairo_t *cr);
+    void (*on_draw)(Shape* self, cairo_t *cr, double scale);
     bool (*is_hit)(Shape* self, double x, double y);
     bool (*is_handle_hit)(Shape* self, double x, double y);
 };
@@ -38,7 +38,7 @@ struct Shape {
 Shape* shape_new();
 void shape_free(Shape* shape);
 
-void shape_draw_handle_at(Shape* self, Point p, cairo_t* cr);
+void shape_draw_handle_at(Shape* self, Point p, cairo_t* cr, double scale);
 
 
 #endif // SHAPE_H

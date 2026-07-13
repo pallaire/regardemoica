@@ -8,8 +8,6 @@
 #include "shape.h"
 #include "point.h"
 
-#define N_ARROWS 3
-
 typedef struct {
     GtkWidget* window;
     GtkDrawingArea* area;
@@ -18,6 +16,7 @@ typedef struct {
     cairo_surface_t* image;
     int              image_w;
     int              image_h;
+    double           scale;
 
     // Shapes
     GList* shapes;  
@@ -37,7 +36,49 @@ typedef struct {
 //  Drawing the app 
 // --------------------------------------------------------------------------------------------------------------------
 
-static void get_image_transform(AppData* app, double* scale, double* off_x, double* off_y) {
+// Get the Gnome desktop display scaling, it might not be at 100%
+static double get_desktop_display_scale(GtkWidget* widget) {
+    GdkSurface *surface = NULL;
+
+    // Try to get the underlying GdkSurface to fetch fractional scaling
+    GtkRoot *root = gtk_widget_get_root(widget);
+    if (GTK_IS_WINDOW(root)) {
+        surface = gtk_native_get_surface(GTK_NATIVE(root));
+    }
+
+    if (surface != NULL) {
+        // gdk_surface_get_scale() returns the exact fractional scale (e.g., 1.25)
+        return gdk_surface_get_scale(surface);
+    }
+
+    // Fallback to integer scale factor (e.g., 1 or 2) if surface isn't ready
+    return (double)gtk_widget_get_scale_factor(widget);
+}
+
+// Programmatically set the scale of the canvas
+static void set_background_scale(AppData* app, double new_scale) {
+    if(app->image == NULL) {
+        return;
+    }
+
+    if (new_scale < 0.2 || new_scale > 4.0) {
+        return;
+    }
+    
+    app->scale = new_scale;
+
+    // Determine the system's display scale (e.g. 1.
+    // Get the Gnome desktop display scaling, it might not be at 100%25)
+    double display_scale = get_desktop_display_scale(GTK_WIDGET(app->area));    
+    
+    // Update the drawing area's size requests so the GtkScrolledWindow knows when to show scrollbars.
+    gtk_drawing_area_set_content_width(app->area, (int)(app->image_w * app->scale / display_scale));
+    gtk_drawing_area_set_content_height(app->area, (int)(app->image_h * app->scale / display_scale));
+
+    gtk_widget_queue_draw(GTK_WIDGET(app->area));
+}
+
+static void get_background_transform(AppData* app, double* scale, double* off_x, double* off_y) {
     if (app->image == NULL) {
         *scale = 1.0; *off_x = 0.0; *off_y = 0.0;
         return;
@@ -46,43 +87,45 @@ static void get_image_transform(AppData* app, double* scale, double* off_x, doub
     int width  = gtk_widget_get_width(GTK_WIDGET(app->area));
     int height = gtk_widget_get_height(GTK_WIDGET(app->area));
 
-    *scale = MIN((double)width  / app->image_w,
-                 (double)height / app->image_h);
+    // Get current system scale 
+    // Get the Gnome desktop display scaling, it might not be at 100%
+    double display_scale = get_desktop_display_scale(GTK_WIDGET(app->area));    
+
+    *scale = (1.0 / display_scale) * app->scale;
     *off_x = (width  - app->image_w * *scale) / 2.0;
     *off_y = (height - app->image_h * *scale) / 2.0;
+
+    if (*off_x < 0.0) *off_x = 0.0;
+    if (*off_y < 0.0) *off_y = 0.0;
 }
 
 static Point widget_to_image(AppData* app, double wx, double wy) {
     double scale, off_x, off_y;
-    get_image_transform(app, &scale, &off_x, &off_y);
+    get_background_transform(app, &scale, &off_x, &off_y);
     return point_new((wx - off_x) / scale, (wy - off_y) / scale);
 }
 
-static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int width, int height, gpointer user_data) {
+static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int /*width*/, int /*height*/, gpointer user_data) {
     AppData* app = user_data;
 
     // Background image (scaled to fit, centered, letterboxed)
     if (app->image != NULL) {
-        double scale  = MIN((double)width  / app->image_w,
-                            (double)height / app->image_h);
-        double draw_w = app->image_w * scale;
-        double draw_h = app->image_h * scale;
-        double off_x  = (width  - draw_w) / 2.0;
-        double off_y  = (height - draw_h) / 2.0;
-
+        double scale, off_x, off_y;
+        get_background_transform(app, &scale, &off_x, &off_y);
+        
         cairo_save(cr);
         cairo_translate(cr, off_x, off_y);
         cairo_scale(cr, scale, scale);
         cairo_set_source_surface(cr, app->image, 0, 0);
         cairo_paint(cr);
         cairo_restore(cr);
-    }
 
-    // Draw all elements on top of the background
-    for (GList* l = app->shapes; l != NULL; l = l->next) {
-        Shape* s = (Shape*)l->data;
-        s->on_draw(s, cr);
-    }    
+        // Draw all elements on top of the background
+        for (GList* l = app->shapes; l != NULL; l = l->next) {
+            Shape* s = (Shape*)l->data;
+            s->on_draw(s, cr, scale);
+        }    
+    }
 }
 
 
@@ -206,6 +249,8 @@ static void set_background_from_file(GFile* file, gpointer user_data) {
     app->image = surface;
     app->image_w = w;
     app->image_h = h;
+
+    set_background_scale(app, 1.0);
 
     gtk_widget_queue_draw(GTK_WIDGET(app->area));
 }
@@ -337,7 +382,39 @@ static void on_menu_save_as(GSimpleAction *action, GVariant *parameter, gpointer
     g_print("Save As clicked!\n");
 }
 
-// Ctrl+o shortcut callback
+// Ctrl++ Scale Up
+static gboolean on_scale_up(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
+    AppData* app = user_data;
+
+    double new_scale = app->scale;
+    if(new_scale >= 1.0) {
+        new_scale += 0.25;
+    } else {
+        new_scale += 0.1;
+    }
+
+    set_background_scale(app, new_scale);
+    printf("Scale up keys, new scale: %f\n", app->scale);
+    return true;
+}
+
+// Ctrl+- Scale Down
+static gboolean on_scale_down(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
+    AppData* app = user_data;
+
+    double new_scale = app->scale;
+    if(new_scale > 1.0) {
+        new_scale -= 0.25;
+    } else {
+        new_scale -= 0.1;
+    }
+
+    set_background_scale(app, new_scale);
+    printf("Scale down keys, new scale: %f\n", app->scale);
+    return true;
+}
+
+// Ctrl+o File Open
 static gboolean on_open_shortcut(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
     on_open_clicked(NULL, user_data);
     return true;
@@ -401,6 +478,7 @@ static GMenuModel* create_menu_model() {
 
 static GtkWidget* main_window_new(AdwApplication* adw_app) {
     AppData* app = g_new0(AppData, 1);
+    app->scale = 1.0;
 
     app->window = adw_application_window_new(GTK_APPLICATION(adw_app));
     gtk_window_set_title(GTK_WINDOW(app->window), "Regarde Moi Ca");
@@ -454,16 +532,25 @@ static GtkWidget* main_window_new(AdwApplication* adw_app) {
     g_signal_connect(drag, "drag-end",    G_CALLBACK(on_drag_end),    app);
     gtk_widget_add_controller(area, GTK_EVENT_CONTROLLER(drag));
 
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), area);
+    // adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), area);
+    // Scrolled window so images larger than the viewport can be panned at 100%
+    GtkWidget* scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), area);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), scrolled);
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(app->window), toolbar_view);
 
     // Ctrl+O shortcut
     GtkShortcut* shortcutCTRLO = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>o"), gtk_callback_action_new(on_open_shortcut, app, NULL));
     GtkShortcut* shortcutDEL = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("Delete"), gtk_callback_action_new(on_delete_shortcut, app, NULL));
+    GtkShortcut* shortcutCTRLPLUS = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>equal"), gtk_callback_action_new(on_scale_up, app, NULL));
+    GtkShortcut* shortcutCTRLMINUS = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>minus"), gtk_callback_action_new(on_scale_down, app, NULL));
     GtkEventController* controller = gtk_shortcut_controller_new();
     gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(controller), GTK_SHORTCUT_SCOPE_GLOBAL);
     gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLO);
     gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutDEL);
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLPLUS);
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLMINUS);
     gtk_widget_add_controller(app->window, controller);
 
     // Hiding of the main window, to take a screenshot

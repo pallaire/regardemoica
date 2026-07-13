@@ -9,14 +9,14 @@
 
 
 // cairo context docs: https://www.cairographics.org/manual/cairo-cairo-t.html
-static void arrow_draw_one(Shape* self, cairo_t* cr, RGBA color, double dx_off, double dy_off) {
+static void arrow_draw_one(Shape* self, cairo_t* cr, double scale, RGBA color, double dx_off, double dy_off) {
     double length = points_distance(&self->points[0], &self->points[1]);
     double angle = points_angle(&self->points[0], &self->points[1]);
 
-    const double head_length      = 28.0;
-    const double head_tick_height = 10.0;
-    const double head_tick_length = 3.0;
-    const double tail_height      = 16.0;
+    const double head_length      = 28.0 * scale;
+    const double head_tick_height = 10.0 * scale;
+    const double head_tick_length = 3.0 * scale;
+    const double tail_height      = 16.0 * scale;
 
     cairo_save(cr);
     cairo_set_line_width(cr, 5.0);
@@ -43,14 +43,14 @@ static void arrow_draw_one(Shape* self, cairo_t* cr, RGBA color, double dx_off, 
     cairo_restore(cr);
 }
 
-static void arrow_on_draw(Shape* self, cairo_t* cr) {
+static void arrow_on_draw(Shape* self, cairo_t* cr, double scale) {
     // Drop shadow, then the colored arrow on top
-    arrow_draw_one(self, cr, self->color_shadow, 1, 1);
-    arrow_draw_one(self, cr, self->color, 0, 0);
+    arrow_draw_one(self, cr, scale, self->color_shadow, 1, 1);
+    arrow_draw_one(self, cr, scale, self->color, 0, 0);
 
     if(self->is_showing_handles) {
-        shape_draw_handle_at(self, self->points[0], cr);
-        shape_draw_handle_at(self, self->points[1], cr);
+        shape_draw_handle_at(self, self->points[0], cr, scale);
+        shape_draw_handle_at(self, self->points[1], cr, scale);
     }
 }
 
