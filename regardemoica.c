@@ -37,6 +37,27 @@ typedef struct {
 //  Drawing the app 
 // --------------------------------------------------------------------------------------------------------------------
 
+static void get_image_transform(AppData* app, double* scale, double* off_x, double* off_y) {
+    if (app->image == NULL) {
+        *scale = 1.0; *off_x = 0.0; *off_y = 0.0;
+        return;
+    }
+
+    int width  = gtk_widget_get_width(GTK_WIDGET(app->area));
+    int height = gtk_widget_get_height(GTK_WIDGET(app->area));
+
+    *scale = MIN((double)width  / app->image_w,
+                 (double)height / app->image_h);
+    *off_x = (width  - app->image_w * *scale) / 2.0;
+    *off_y = (height - app->image_h * *scale) / 2.0;
+}
+
+static Point widget_to_image(AppData* app, double wx, double wy) {
+    double scale, off_x, off_y;
+    get_image_transform(app, &scale, &off_x, &off_y);
+    return point_new((wx - off_x) / scale, (wy - off_y) / scale);
+}
+
 static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int width, int height, gpointer user_data) {
     AppData* app = user_data;
 
@@ -74,10 +95,18 @@ static void on_drag_begin(GtkGestureDrag* /*gesture*/, double x, double y, gpoin
     AppData* app = user_data;
     app->drag_start_x = x;
     app->drag_start_y = y;
+
+    Point tmp = widget_to_image(app, x, y);
+    printf("Clicked into image at : %f x %f\n", tmp.x, tmp.y);
 }
 
 static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gpointer user_data) {
     AppData* app = user_data;
+
+    // No dragging/creating if no background image
+    if(app->image == NULL) {
+        return;
+    }
 
     if(app->dragging == false) {
         // check to see if we should start dragging a NEW shape or a SELECTED shape
@@ -113,6 +142,11 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
 
 static void on_drag_end(GtkGestureDrag* /*gesture*/, double /*dx*/, double /*dy*/, gpointer user_data) {
     AppData* app = user_data;
+
+    // No dragging/creating if no background image
+    if(app->image == NULL) {
+        return;
+    }
     
     if(app->dragging) {
         // we are done creating/modifying the shape
@@ -285,10 +319,47 @@ static void on_open_clicked(GtkButton* /*btn*/, gpointer user_data) {
     gtk_file_dialog_open(dialog, GTK_WINDOW(app->window), NULL, on_file_chosen, user_data);
 }
 
+
+// --------------------------------------------------------------------------------------------------------------------
+//  Keyboard Shortcuts and Menu Items
+// --------------------------------------------------------------------------------------------------------------------
+
+// 1. Define action callbacks for when items are clicked
+static void on_menu_open(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    g_print("Open clicked!\n");
+}
+
+static void on_menu_save(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    g_print("Save clicked!\n");
+}
+
+static void on_menu_save_as(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    g_print("Save As clicked!\n");
+}
+
 // Ctrl+o shortcut callback
 static gboolean on_open_shortcut(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
     on_open_clicked(NULL, user_data);
     return true;
+}
+
+// Del shortcut callback
+static gboolean on_delete_shortcut(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
+    AppData* app = user_data;
+    if(app->selected_shape != NULL) {
+        for (GList* l = app->shapes; l != NULL; l = l->next) {
+            Shape* s = (Shape*)l->data;
+            if(s == app->selected_shape) {
+                app->shapes = g_list_remove_link(app->shapes, l);   // Remove element from list, returns the head
+                shape_free(s);                                       // Free the shape and its data
+                g_list_free(l);                                      // Free the list element itself
+                app->selected_shape = NULL;
+                gtk_widget_queue_draw(GTK_WIDGET(app->area));
+                return true;
+            }
+        }    
+    }
+    return false;
 }
 
 
@@ -296,7 +367,7 @@ static gboolean on_open_shortcut(GtkWidget* /*widget*/, GVariant* /*args*/, gpoi
 //  Application teardown 
 // --------------------------------------------------------------------------------------------------------------------
 
-static void annotator_free(gpointer data) {
+static void main_window_free(gpointer data) {
     AppData* app = data;
 
     for (GList* l = app->shapes; l != NULL; l = l->next) {
@@ -313,6 +384,21 @@ static void annotator_free(gpointer data) {
 //  Main window creation 
 // --------------------------------------------------------------------------------------------------------------------
 
+static GMenuModel* create_menu_model() {
+    GMenu* main_menu = g_menu_new();
+    GMenu* file_section = g_menu_new();
+
+    // Add individual items to the submenu (Label, Action Name)
+    // Note: "win." matches the target scope prefix of the window actions
+    g_menu_append(file_section, "Open", "win.open");
+    g_menu_append(file_section, "Save", "win.save");
+    g_menu_append(file_section, "Save As...", "win.save-as");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(file_section));
+
+    g_object_unref(file_section);
+    return G_MENU_MODEL(main_menu);
+}
+
 static GtkWidget* main_window_new(AdwApplication* adw_app) {
     AppData* app = g_new0(AppData, 1);
 
@@ -320,9 +406,8 @@ static GtkWidget* main_window_new(AdwApplication* adw_app) {
     gtk_window_set_title(GTK_WINDOW(app->window), "Regarde Moi Ca");
     gtk_window_set_default_size(GTK_WINDOW(app->window), 900, 640);
 
-    // Tie the Annotator's lifetime to the window
-    g_object_set_data_full(G_OBJECT(app->window), "annotator-state",
-                           app, annotator_free);
+    // Tie the RegardeMoiCa's lifetime to the window
+    g_object_set_data_full(G_OBJECT(app->window), "regardemoica-state", app, main_window_free);
 
     // Layout: ToolbarView with a HeaderBar on top
     GtkWidget* toolbar_view = adw_toolbar_view_new();
@@ -340,6 +425,20 @@ static GtkWidget* main_window_new(AdwApplication* adw_app) {
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), screenshot_btn);
 
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), header);
+
+
+    // Create the Menu Button (The Burger Menu)
+    GtkWidget *menu_button = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button), "open-menu-symbolic");
+    gtk_widget_set_tooltip_text(menu_button, "Main Menu");    
+
+    // g_autoptr(GMenuModel) menu_model = create_menu_model();
+    GMenuModel* menu_model = create_menu_model();
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button), menu_model);
+
+    // Pack the burger menu on the right edge (end) of the header bar
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), menu_button);
+
 
     // Drawing area: paints the image, then the arrows on top
     GtkWidget* area = gtk_drawing_area_new();
@@ -359,10 +458,12 @@ static GtkWidget* main_window_new(AdwApplication* adw_app) {
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(app->window), toolbar_view);
 
     // Ctrl+O shortcut
-    GtkShortcut* shortcut = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>o"), gtk_callback_action_new(on_open_shortcut, app, NULL));
+    GtkShortcut* shortcutCTRLO = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>o"), gtk_callback_action_new(on_open_shortcut, app, NULL));
+    GtkShortcut* shortcutDEL = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("Delete"), gtk_callback_action_new(on_delete_shortcut, app, NULL));
     GtkEventController* controller = gtk_shortcut_controller_new();
     gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(controller), GTK_SHORTCUT_SCOPE_GLOBAL);
-    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcut);
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLO);
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutDEL);
     gtk_widget_add_controller(app->window, controller);
 
     // Hiding of the main window, to take a screenshot

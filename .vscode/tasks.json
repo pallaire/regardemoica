@@ -4,23 +4,55 @@
     {
       "label": "Build RegardeMoiCa (Release)",
       "type": "shell",
-      "command": "make",
-      "args": ["RELEASE=1"],
-      "problemMatcher": ["$gcc"]
+      "command": "make RELEASE=1",
+      "problemMatcher": ["$gcc"],
+      "runOptions": {
+        "instanceLimit": 1,
+        "runOn": "default"
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",          
+        "showReuseMessage": false,  
+        "clear": true,
+        "close": false // Forces VS Code to release control but leave the window open
+      }      
     },
     {
       "label": "Build RegardeMoiCa (Debug)",
       "type": "shell",
-      "command": "make",
-      "args": ["DEBUG=1"],
+      "command": "make DEBUG=1",
       "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": ["$gcc"],
+      "runOptions": {
+        "instanceLimit": 1,
+        "runOn": "default"
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",          
+        "showReuseMessage": false,  
+        "clear": true,
+        "close": false
+      }      
     },
     {
       "label": "Clean",
       "type": "shell",
-      "command": "make",
-      "args": ["clean"]
+      "command": "make clean",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",          
+        "showReuseMessage": false,  
+        "clear": true,
+        "close": false
+      }      
     }
-  ],
+  ]
 }

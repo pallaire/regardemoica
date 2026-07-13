@@ -24,8 +24,6 @@ static void arrow_draw_one(Shape* self, cairo_t* cr, RGBA color, double dx_off, 
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_MITER);
     cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
 
-    printf("Length:%g  Angle:%g\n", length, angle);
-
     // Move origin to start point, rotate so +X points at the end 
     cairo_translate(cr, self->points[0].x + dx_off, self->points[0].y + dy_off);
     cairo_rotate(cr, angle);
