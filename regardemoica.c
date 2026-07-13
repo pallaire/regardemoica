@@ -99,10 +99,12 @@ static void get_background_transform(AppData* app, double* scale, double* off_x,
     if (*off_y < 0.0) *off_y = 0.0;
 }
 
-static Point widget_to_image(AppData* app, double wx, double wy) {
+static void widget_to_background(AppData* app, double wx, double wy, double* bx, double* by) {
     double scale, off_x, off_y;
     get_background_transform(app, &scale, &off_x, &off_y);
-    return point_new((wx - off_x) / scale, (wy - off_y) / scale);
+    
+    *bx = (wx - off_x) / scale;
+    *by = (wy - off_y) / scale;
 }
 
 static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int /*width*/, int /*height*/, gpointer user_data) {
@@ -118,13 +120,14 @@ static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int /*width*/, int /*
         cairo_scale(cr, scale, scale);
         cairo_set_source_surface(cr, app->image, 0, 0);
         cairo_paint(cr);
-        cairo_restore(cr);
 
         // Draw all elements on top of the background
         for (GList* l = app->shapes; l != NULL; l = l->next) {
             Shape* s = (Shape*)l->data;
             s->on_draw(s, cr, scale);
         }    
+
+        cairo_restore(cr);
     }
 }
 
@@ -136,11 +139,9 @@ static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int /*width*/, int /*
 
 static void on_drag_begin(GtkGestureDrag* /*gesture*/, double x, double y, gpointer user_data) {
     AppData* app = user_data;
+
     app->drag_start_x = x;
     app->drag_start_y = y;
-
-    Point tmp = widget_to_image(app, x, y);
-    printf("Clicked into image at : %f x %f\n", tmp.x, tmp.y);
 }
 
 static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gpointer user_data) {
@@ -151,13 +152,17 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
         return;
     }
 
+    // Get background coordinates
+    double bg_start_x, bg_start_y, bg_current_x, bg_current_y;
+    widget_to_background(app, app->drag_start_x, app->drag_start_y, &bg_start_x, &bg_start_y);
+    widget_to_background(app, app->drag_start_x+dx, app->drag_start_y+dy, &bg_current_x, &bg_current_y);
+
     if(app->dragging == false) {
         // check to see if we should start dragging a NEW shape or a SELECTED shape
         if(gtk_drag_check_threshold(GTK_WIDGET(app->area), app->drag_start_x, app->drag_start_y, app->drag_start_x+dx, app->drag_start_y+dy)) {
-
             if(app->selected_shape != NULL) {
                 // check if we are close enough of a control point? 
-                if(app->selected_shape->is_handle_hit(app->selected_shape, app->drag_start_x, app->drag_start_y)) {
+                if(app->selected_shape->is_handle_hit(app->selected_shape, bg_start_x, bg_start_y)) {
                     printf("drag update, close to handle, selected handle: %d\n", app->selected_shape->dragging_point);
                     app->dragging = true;
                 } else {
@@ -168,7 +173,7 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
 
             } else {
                 // start a new shape with the current selected shape type.
-                Shape* arrow = arrow_new(point_new(app->drag_start_x, app->drag_start_y), point_new(app->drag_start_x+dx, app->drag_start_y+dy));
+                Shape* arrow = arrow_new(point_new(bg_start_x, bg_start_y), point_new(bg_current_x, bg_current_y));
                 arrow->dragging_point = 1;
                 app->shapes = g_list_append(app->shapes, arrow);
                 app->selected_shape = arrow;
@@ -178,7 +183,7 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
     } 
     
     if(app->dragging) {
-        app->selected_shape->points[app->selected_shape->dragging_point] = point_new(app->drag_start_x+dx, app->drag_start_y+dy);
+        app->selected_shape->points[app->selected_shape->dragging_point] = point_new(bg_current_x, bg_current_y);
         gtk_widget_queue_draw(GTK_WIDGET(app->area));
     }
 }
@@ -210,10 +215,14 @@ static void on_drag_end(GtkGestureDrag* /*gesture*/, double /*dx*/, double /*dy*
             s->is_showing_handles = false;
         }    
 
+        // Get background coordinates
+        double bg_start_x, bg_start_y;
+        widget_to_background(app, app->drag_start_x, app->drag_start_y, &bg_start_x, &bg_start_y);
+
         // Now check if we are in a shape ... and select it if it is the case
         for (GList* l = app->shapes; l != NULL; l = l->next) {
             Shape* s = (Shape*)l->data;
-            if(s->is_hit(s, app->drag_start_x, app->drag_start_y)) {
+            if(s->is_hit(s, bg_start_x, bg_start_y)) {
                 s->is_showing_handles = true;
                 app->selected_shape = s;
                 break;
