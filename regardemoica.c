@@ -9,6 +9,7 @@
 #include "point.h"
 
 typedef struct {
+    AdwApplication* adwaita_app;
     GtkWidget* window;
     GtkDrawingArea* area;
 
@@ -35,6 +36,12 @@ typedef struct {
 // --------------------------------------------------------------------------------------------------------------------
 //  Drawing the app 
 // --------------------------------------------------------------------------------------------------------------------
+
+static void force_redraw(AppData* app) {
+    if(app && app->area) {
+        gtk_widget_queue_draw(GTK_WIDGET(app->area));
+    }
+}
 
 // Get the Gnome desktop display scaling, it might not be at 100%
 static double get_desktop_display_scale(GtkWidget* widget) {
@@ -75,7 +82,7 @@ static void set_background_scale(AppData* app, double new_scale) {
     gtk_drawing_area_set_content_width(app->area, (int)(app->image_w * app->scale / display_scale));
     gtk_drawing_area_set_content_height(app->area, (int)(app->image_h * app->scale / display_scale));
 
-    gtk_widget_queue_draw(GTK_WIDGET(app->area));
+    force_redraw(app);
 }
 
 static void get_background_transform(AppData* app, double* scale, double* off_x, double* off_y) {
@@ -184,7 +191,7 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
     
     if(app->dragging) {
         app->selected_shape->points[app->selected_shape->dragging_point] = point_new(bg_current_x, bg_current_y);
-        gtk_widget_queue_draw(GTK_WIDGET(app->area));
+        force_redraw(app);
     }
 }
 
@@ -230,7 +237,7 @@ static void on_drag_end(GtkGestureDrag* /*gesture*/, double /*dx*/, double /*dy*
         }    
     }
 
-    gtk_widget_queue_draw(GTK_WIDGET(app->area));
+    force_redraw(app);
 }
 
 
@@ -260,8 +267,7 @@ static void set_background_from_file(GFile* file, gpointer user_data) {
     app->image_h = h;
 
     set_background_scale(app, 1.0);
-
-    gtk_widget_queue_draw(GTK_WIDGET(app->area));
+    force_redraw(app);
 }
 
 
@@ -440,12 +446,43 @@ static gboolean on_delete_shortcut(GtkWidget* /*widget*/, GVariant* /*args*/, gp
                 shape_free(s);                                       // Free the shape and its data
                 g_list_free(l);                                      // Free the list element itself
                 app->selected_shape = NULL;
-                gtk_widget_queue_draw(GTK_WIDGET(app->area));
+                force_redraw(app);
                 return true;
             }
         }    
     }
     return false;
+}
+
+// Ctrl+q Quit App
+static gboolean on_quit(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
+    AppData* app = user_data;
+
+    // Save if auto save
+
+    // or Ask to save if not
+
+    g_application_quit(G_APPLICATION(app->adwaita_app));
+
+    return true;
+}
+
+
+// ESC remove shape selection
+static gboolean on_escape(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
+    AppData* app = user_data;
+    if(app->selected_shape != NULL) {
+        app->selected_shape = NULL;
+
+        for (GList* l = app->shapes; l != NULL; l = l->next) {
+            Shape* s = (Shape*)l->data;
+            s->is_showing_handles = false;
+        }
+
+        force_redraw(app);
+    }
+
+    return true;
 }
 
 
@@ -487,6 +524,8 @@ static GMenuModel* create_menu_model() {
 
 static GtkWidget* main_window_new(AdwApplication* adw_app) {
     AppData* app = g_new0(AppData, 1);
+    
+    app->adwaita_app = adw_app;
     app->scale = 1.0;
 
     app->window = adw_application_window_new(GTK_APPLICATION(adw_app));
@@ -549,17 +588,21 @@ static GtkWidget* main_window_new(AdwApplication* adw_app) {
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), scrolled);
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(app->window), toolbar_view);
 
-    // Ctrl+O shortcut
+    // Shortcuts
+    GtkShortcut* shortcutCTRLQ = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>q"), gtk_callback_action_new(on_quit, app, NULL));
     GtkShortcut* shortcutCTRLO = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>o"), gtk_callback_action_new(on_open_shortcut, app, NULL));
     GtkShortcut* shortcutDEL = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("Delete"), gtk_callback_action_new(on_delete_shortcut, app, NULL));
     GtkShortcut* shortcutCTRLPLUS = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>equal"), gtk_callback_action_new(on_scale_up, app, NULL));
     GtkShortcut* shortcutCTRLMINUS = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Control>minus"), gtk_callback_action_new(on_scale_down, app, NULL));
+    GtkShortcut* shortcutESCAPE = gtk_shortcut_new(gtk_shortcut_trigger_parse_string("Escape"), gtk_callback_action_new(on_escape, app, NULL));
     GtkEventController* controller = gtk_shortcut_controller_new();
     gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(controller), GTK_SHORTCUT_SCOPE_GLOBAL);
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLQ);
     gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLO);
     gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutDEL);
     gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLPLUS);
     gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutCTRLMINUS);
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(controller), shortcutESCAPE);
     gtk_widget_add_controller(app->window, controller);
 
     // Hiding of the main window, to take a screenshot
