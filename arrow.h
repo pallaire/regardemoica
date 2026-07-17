@@ -5,7 +5,7 @@
 #include "shape.h"
 
 Shape* arrow_new(Point start, Point end);
-void   arrow_free(Shape* self);
+void   arrow_free_data(Shape* self);
 
 
 #endif // ARROW_H

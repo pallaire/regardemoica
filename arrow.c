@@ -120,9 +120,11 @@ Shape *arrow_new(Point start, Point end) {
 
     self->color = (RGBA){ 0.8784, 0.0157, 0.749, 1};
     self->color_shadow = (RGBA){ 0.1, 0.1, 0.1, 0.3};
+
+    self->free_data = arrow_free_data;
     return self;
 }
 
-void arrow_free(Shape* self) {
-    shape_free(self);
+void arrow_free_data(Shape* self) {
+    // NA
 }

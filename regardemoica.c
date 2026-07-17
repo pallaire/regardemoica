@@ -1,6 +1,4 @@
-
 #include <adwaita.h>
-
 #include <libportal/portal.h>
 #include <libportal-gtk4/portal-gtk4.h>
 

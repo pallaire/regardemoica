@@ -26,9 +26,10 @@ struct Shape {
     RGBA    color;
     RGBA    color_accent;
     RGBA    color_shadow;
-    char*   text;
+    char*   data;
 
     // Callbacks function pointers
+    void (*free_data)(Shape* self);
     void (*on_draw)(Shape* self, cairo_t *cr, double scale);
     bool (*is_hit)(Shape* self, double x, double y);
     bool (*is_handle_hit)(Shape* self, double x, double y);
@@ -36,8 +37,7 @@ struct Shape {
 
 
 Shape* shape_new();
-void shape_free(Shape* shape);
-
+void shape_free(Shape* self);
 void shape_draw_handle_at(Shape* self, Point p, cairo_t* cr, double scale);
 
 
