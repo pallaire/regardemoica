@@ -24,11 +24,17 @@ typedef struct {
     Shape* selected_shape;
 
     //Drag-to-draw state, widget coordinates.
-    double   drag_start_x, drag_start_y;
-    gboolean dragging;
+    double  drag_start_x, drag_start_y, drag_save_x, drag_save_y;
+    bool    dragging;
+    bool    dragging_new_shape;
+    bool    dragging_cancelled;
 
     // App and Window states
-    gboolean    screenshot_in_progress;
+    bool    screenshot_in_progress;
+
+    // Output data
+    char    output_path[1024];
+    bool    output_auto_save;
 
 } AppData;
 
@@ -75,7 +81,7 @@ static void set_background_scale(AppData* app, double new_scale) {
     app->scale = new_scale;
 
     // Determine the system's display scale (e.g. 1.
-    // Get the Gnome desktop display scaling, it might not be at 100%25)
+    // Get the Gnome desktop display scaling, it might not be at 100%)
     double display_scale = get_desktop_display_scale(GTK_WIDGET(app->area));    
     
     // Update the drawing area's size requests so the GtkScrolledWindow knows when to show scrollbars.
@@ -139,107 +145,6 @@ static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int /*width*/, int /*
 }
 
 
-// --------------------------------------------------------------------------------------------------------------------
-//  Drag to draw elements 
-//  Click selection detection
-// --------------------------------------------------------------------------------------------------------------------
-
-static void on_drag_begin(GtkGestureDrag* /*gesture*/, double x, double y, gpointer user_data) {
-    AppData* app = user_data;
-
-    app->drag_start_x = x;
-    app->drag_start_y = y;
-}
-
-static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gpointer user_data) {
-    AppData* app = user_data;
-
-    // No dragging/creating if no background image
-    if(app->image == NULL) {
-        return;
-    }
-
-    // Get background coordinates
-    double bg_start_x, bg_start_y, bg_current_x, bg_current_y;
-    widget_to_background(app, app->drag_start_x, app->drag_start_y, &bg_start_x, &bg_start_y);
-    widget_to_background(app, app->drag_start_x+dx, app->drag_start_y+dy, &bg_current_x, &bg_current_y);
-
-    if(app->dragging == false) {
-        // check to see if we should start dragging a NEW shape or a SELECTED shape
-        if(gtk_drag_check_threshold(GTK_WIDGET(app->area), app->drag_start_x, app->drag_start_y, app->drag_start_x+dx, app->drag_start_y+dy)) {
-            if(app->selected_shape != NULL) {
-                // check if we are close enough of a control point? 
-                if(app->selected_shape->is_handle_hit(app->selected_shape, bg_start_x, bg_start_y)) {
-                    printf("drag update, close to handle, selected handle: %d\n", app->selected_shape->dragging_point);
-                    app->dragging = true;
-                } else {
-                    // click away, deselect
-                    app->selected_shape->is_showing_handles = false;
-                    app->selected_shape = NULL;
-                }
-
-            } else {
-                // start a new shape with the current selected shape type.
-                Shape* arrow = arrow_new(point_new(bg_start_x, bg_start_y), point_new(bg_current_x, bg_current_y));
-                arrow->dragging_point = 1;
-                app->shapes = g_list_append(app->shapes, arrow);
-                app->selected_shape = arrow;
-                app->dragging = true;
-            }
-        }
-    } 
-    
-    if(app->dragging) {
-        app->selected_shape->points[app->selected_shape->dragging_point] = point_new(bg_current_x, bg_current_y);
-        force_redraw(app);
-    }
-}
-
-static void on_drag_end(GtkGestureDrag* /*gesture*/, double /*dx*/, double /*dy*/, gpointer user_data) {
-    AppData* app = user_data;
-
-    // No dragging/creating if no background image
-    if(app->image == NULL) {
-        return;
-    }
-    
-    if(app->dragging) {
-        // we are done creating/modifying the shape
-        app->dragging = false;
-
-        // We undo the shape selection, only on new creation, 
-        // If it is showing its handles, it was selected manually.
-        if(app->selected_shape->is_showing_handles == false) {
-            app->selected_shape = NULL;
-        }
-    } else {
-        // We were not dragging, so lets find out if we clicked a shape.
-
-        // Start by deselecting all the shapes
-        app->selected_shape = NULL;
-        for (GList* l = app->shapes; l != NULL; l = l->next) {
-            Shape* s = (Shape*)l->data;
-            s->is_showing_handles = false;
-        }    
-
-        // Get background coordinates
-        double bg_start_x, bg_start_y;
-        widget_to_background(app, app->drag_start_x, app->drag_start_y, &bg_start_x, &bg_start_y);
-
-        // Now check if we are in a shape ... and select it if it is the case
-        for (GList* l = app->shapes; l != NULL; l = l->next) {
-            Shape* s = (Shape*)l->data;
-            if(s->is_hit(s, bg_start_x, bg_start_y)) {
-                s->is_showing_handles = true;
-                app->selected_shape = s;
-                break;
-            }
-        }    
-    }
-
-    force_redraw(app);
-}
-
 
 // --------------------------------------------------------------------------------------------------------------------
 //  Background handling 
@@ -267,6 +172,156 @@ static void set_background_from_file(GFile* file, gpointer user_data) {
     app->image_h = h;
 
     set_background_scale(app, 1.0);
+    force_redraw(app);
+}
+
+static void save(gpointer user_data) {
+    AppData* app = user_data;
+
+    if(app->image == NULL) {
+        return;
+    }
+
+    printf("SAVING @ %s\n", app->output_path);
+
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, app->image_w, app->image_h);
+    cairo_t *cr = cairo_create(surface);
+
+    double display_scale = get_desktop_display_scale(GTK_WIDGET(app->area));    
+
+    // get_background_transform(app, &scale, &off_x, &off_y);
+    
+    // cairo_save(cr);
+    // cairo_translate(cr, off_x, off_y);
+    // cairo_scale(cr, scale, scale);
+    cairo_set_source_surface(cr, app->image, 0, 0);
+    cairo_paint(cr);
+
+    // Draw all elements on top of the background
+    for (GList* l = app->shapes; l != NULL; l = l->next) {
+        Shape* s = (Shape*)l->data;
+        s->on_draw(s, cr, display_scale);
+    }    
+
+    cairo_surface_write_to_png(surface, app->output_path);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+}
+
+
+
+// --------------------------------------------------------------------------------------------------------------------
+//  Drag to draw elements 
+//  Click selection detection
+// --------------------------------------------------------------------------------------------------------------------
+
+static void on_drag_begin(GtkGestureDrag* /*gesture*/, double x, double y, gpointer user_data) {
+    AppData* app = user_data;
+
+    app->drag_start_x = x;
+    app->drag_start_y = y;
+
+    app->dragging_cancelled = false;
+}
+
+static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gpointer user_data) {
+    AppData* app = user_data;
+
+    // No dragging/creating if no background image or if the dragging was cancelled
+    if(app->image == NULL || app->dragging_cancelled) {
+        return;
+    }
+
+
+    // Get background coordinates
+    double bg_start_x, bg_start_y, bg_current_x, bg_current_y;
+    widget_to_background(app, app->drag_start_x, app->drag_start_y, &bg_start_x, &bg_start_y);
+    widget_to_background(app, app->drag_start_x+dx, app->drag_start_y+dy, &bg_current_x, &bg_current_y);
+
+    if(app->dragging == false) {
+        // check to see if we should start dragging a NEW shape or a SELECTED shape
+        if(gtk_drag_check_threshold(GTK_WIDGET(app->area), app->drag_start_x, app->drag_start_y, app->drag_start_x+dx, app->drag_start_y+dy)) {
+            if(app->selected_shape != NULL) {
+                // check if we are close enough of a control point? 
+                if(app->selected_shape->is_handle_hit(app->selected_shape, bg_start_x, bg_start_y)) {
+                    // We are starting to drag an OLD shape
+                    app->dragging = true;
+                    app->dragging_new_shape = false;
+                    // save the starting point of the shape, in case of an cancel drag
+                    app->drag_save_x = app->selected_shape->points[app->selected_shape->dragging_point].x;
+                    app->drag_save_y = app->selected_shape->points[app->selected_shape->dragging_point].y;
+                } else {
+                    // click away, deselect
+                    app->selected_shape->is_showing_handles = false;
+                    app->selected_shape = NULL;
+                }
+
+            } else {
+                // start a new shape with the current selected shape type.
+                Shape* arrow = arrow_new(point_new(bg_start_x, bg_start_y), point_new(bg_current_x, bg_current_y));
+                arrow->dragging_point = 1;
+                app->shapes = g_list_append(app->shapes, arrow);
+                app->selected_shape = arrow;
+                app->dragging = true;
+                app->dragging_new_shape = true;
+            }
+        }
+    } 
+    
+    if(app->dragging) {
+        app->selected_shape->points[app->selected_shape->dragging_point] = point_new(bg_current_x, bg_current_y);
+        force_redraw(app);
+    }
+}
+
+static void on_drag_end(GtkGestureDrag* /*gesture*/, double /*dx*/, double /*dy*/, gpointer user_data) {
+    AppData* app = user_data;
+
+    // No dragging/creating if no background image or if the dragging was cancelled
+    if(app->image == NULL || app->dragging_cancelled) {
+        return;
+    }
+    
+    if(app->dragging) {
+        // we are done creating/modifying the shape
+        app->dragging = false;
+        app->dragging_new_shape = false;
+
+        // We undo the shape selection, only on new creation, 
+        // If it is showing its handles, it was selected manually.
+        if(app->selected_shape->is_showing_handles == false) {
+            app->selected_shape = NULL;
+        }
+
+        // Should we save the file???
+        if(app->output_auto_save && *app->output_path) {
+            save(user_data);
+        }
+    } else {
+        // We were not dragging, so lets find out if we clicked a shape.
+
+        // Start by deselecting all the shapes
+        app->selected_shape = NULL;
+        for (GList* l = app->shapes; l != NULL; l = l->next) {
+            Shape* s = (Shape*)l->data;
+            s->is_showing_handles = false;
+        }    
+
+        // Get background coordinates
+        double bg_start_x, bg_start_y;
+        widget_to_background(app, app->drag_start_x, app->drag_start_y, &bg_start_x, &bg_start_y);
+
+        // Now check if we are in a shape ... and select it if it is the case
+        for (GList* l = app->shapes; l != NULL; l = l->next) {
+            Shape* s = (Shape*)l->data;
+            if(s->is_hit(s, bg_start_x, bg_start_y)) {
+                s->is_showing_handles = true;
+                app->selected_shape = s;
+                break;
+            }
+        }    
+    }
+
     force_redraw(app);
 }
 
@@ -301,6 +356,8 @@ static void on_screenshot_done(GObject* source, GAsyncResult* res, gpointer user
 }
 
 static gboolean do_take_screenshot(gpointer user_data) {
+    AppData* app = user_data;
+
     g_autoptr(GError) error = NULL;
 
     XdpPortal* portal = xdp_portal_initable_new(&error);
@@ -316,6 +373,9 @@ static gboolean do_take_screenshot(gpointer user_data) {
                                 NULL,
                                 on_screenshot_done,
                                 user_data);
+
+    sprintf(app->output_path, "%s/tutu.png", g_get_user_special_dir(G_USER_DIRECTORY_PICTURES));
+    
 
     return G_SOURCE_REMOVE;
 }
@@ -468,19 +528,43 @@ static gboolean on_quit(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user
 }
 
 
-// ESC remove shape selection
+// ESC remove shape selection or cancel the creation of a new shape
 static gboolean on_escape(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer user_data) {
     AppData* app = user_data;
     if(app->selected_shape != NULL) {
-        app->selected_shape = NULL;
 
-        for (GList* l = app->shapes; l != NULL; l = l->next) {
-            Shape* s = (Shape*)l->data;
-            s->is_showing_handles = false;
+        // If dragging, stop dragging
+        if(app->dragging) {
+            if(app->dragging_new_shape) {
+                // delete shape
+                for (GList* l = app->shapes; l != NULL; l = l->next) {
+                    Shape* s = (Shape*)l->data;
+                    if(app->selected_shape == s) {
+                        app->shapes = g_list_remove_link(app->shapes, l);   // Remove element from list, returns the head
+                        shape_free(s);     // Free the shape and its data
+                        g_list_free(l);    // Free the list element itself
+                        break;
+                    }
+                }
+            } else {
+                // restore position 
+                app->selected_shape->points[app->selected_shape->dragging_point] = point_new(app->drag_save_x, app->drag_save_y);
+            }
+        } else {
+            // not dragging, so remove shape selected
+            // and remove shape handles
+            for (GList* l = app->shapes; l != NULL; l = l->next) {
+                Shape* s = (Shape*)l->data;
+                s->is_showing_handles = false;
+            }
+            app->selected_shape = NULL;
         }
-
         force_redraw(app);
     }
+
+    app->dragging = false;
+    app->dragging_new_shape = false;
+    app->dragging_cancelled = true;
 
     return true;
 }
@@ -526,6 +610,7 @@ static GtkWidget* main_window_new(AdwApplication* adw_app) {
     AppData* app = g_new0(AppData, 1);
     
     app->adwaita_app = adw_app;
+    app->output_auto_save = true;
     app->scale = 1.0;
 
     app->window = adw_application_window_new(GTK_APPLICATION(adw_app));
