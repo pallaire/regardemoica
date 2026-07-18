@@ -135,7 +135,7 @@ static void on_draw(GtkDrawingArea* /*area*/, cairo_t* cr, int /*width*/, int /*
         // Draw all elements on top of the background
         for (GList* l = app->shapes; l != NULL; l = l->next) {
             Shape* s = (Shape*)l->data;
-            s->on_draw(s, cr, scale);
+            s->draw(s, cr, scale);
         }    
 
         cairo_restore(cr);
@@ -198,7 +198,7 @@ static void save(gpointer user_data) {
     // Draw all elements on top of the background
     for (GList* l = app->shapes; l != NULL; l = l->next) {
         Shape* s = (Shape*)l->data;
-        s->on_draw(s, cr, display_scale);
+        s->draw(s, cr, display_scale);
     }    
 
     cairo_surface_write_to_png(surface, app->output_path);
@@ -246,8 +246,8 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
                     app->dragging = true;
                     app->dragging_new_shape = false;
                     // save the starting point of the shape, in case of an cancel drag
-                    app->drag_save_x = app->selected_shape->points[app->selected_shape->dragging_point].x;
-                    app->drag_save_y = app->selected_shape->points[app->selected_shape->dragging_point].y;
+                    app->drag_save_x = app->selected_shape->points[app->selected_shape->dragging_point_index].x;
+                    app->drag_save_y = app->selected_shape->points[app->selected_shape->dragging_point_index].y;
                 } else {
                     // click away, deselect
                     app->selected_shape->is_showing_handles = false;
@@ -257,7 +257,7 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
             } else {
                 // start a new shape with the current selected shape type.
                 Shape* arrow = arrow_new(point_new(bg_start_x, bg_start_y), point_new(bg_current_x, bg_current_y));
-                arrow->dragging_point = 1;
+                arrow->dragging_point_index = 1;
                 app->shapes = g_list_append(app->shapes, arrow);
                 app->selected_shape = arrow;
                 app->dragging = true;
@@ -267,7 +267,7 @@ static void on_drag_update(GtkGestureDrag* /*gesture*/, double dx, double dy, gp
     } 
     
     if(app->dragging) {
-        app->selected_shape->points[app->selected_shape->dragging_point] = point_new(bg_current_x, bg_current_y);
+        app->selected_shape->points[app->selected_shape->dragging_point_index] = point_new(bg_current_x, bg_current_y);
         force_redraw(app);
     }
 }
@@ -546,7 +546,7 @@ static gboolean on_escape(GtkWidget* /*widget*/, GVariant* /*args*/, gpointer us
                 }
             } else {
                 // restore position 
-                app->selected_shape->points[app->selected_shape->dragging_point] = point_new(app->drag_save_x, app->drag_save_y);
+                app->selected_shape->points[app->selected_shape->dragging_point_index] = point_new(app->drag_save_x, app->drag_save_y);
             }
         } else {
             // not dragging, so remove shape selected

@@ -20,7 +20,7 @@ struct Shape {
     bool    is_selected;
     bool    is_dragging;
     bool    is_showing_handles;
-    int     dragging_point;
+    int     dragging_point_index;
 
     Point   points[2];
     RGBA    color;
@@ -28,9 +28,9 @@ struct Shape {
     RGBA    color_shadow;
     char*   data;
 
-    // Callbacks function pointers
+    // Function pointers, poorman's oop
     void (*free_data)(Shape* self);
-    void (*on_draw)(Shape* self, cairo_t *cr, double scale);
+    void (*draw)(Shape* self, cairo_t *cr, double scale);
     bool (*is_hit)(Shape* self, double x, double y);
     bool (*is_handle_hit)(Shape* self, double x, double y);
 };
@@ -38,6 +38,7 @@ struct Shape {
 
 Shape* shape_new();
 void shape_free(Shape* self);
+void shape_free_data(Shape* self);
 void shape_draw_handle_at(Shape* self, Point p, cairo_t* cr, double scale);
 
 

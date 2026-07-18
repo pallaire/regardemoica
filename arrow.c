@@ -3,12 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 #include "arrow.h"
 #include "shape.h"
 
-
-// cairo context docs: https://www.cairographics.org/manual/cairo-cairo-t.html
 static void arrow_draw_one(Shape* self, cairo_t* cr, double scale, RGBA color, double dx_off, double dy_off) {
     double length = points_distance(&self->points[0], &self->points[1]);
     double angle = points_angle(&self->points[0], &self->points[1]);
@@ -43,7 +40,7 @@ static void arrow_draw_one(Shape* self, cairo_t* cr, double scale, RGBA color, d
     cairo_restore(cr);
 }
 
-static void arrow_on_draw(Shape* self, cairo_t* cr, double scale) {
+static void arrow_draw(Shape* self, cairo_t* cr, double scale) {
     // Drop shadow, then the colored arrow on top
     arrow_draw_one(self, cr, scale, self->color_shadow, 1, 1);
     arrow_draw_one(self, cr, scale, self->color, 0, 0);
@@ -83,27 +80,18 @@ static bool arrow_is_hit(Shape* self, double x, double y) {
 static bool arrow_is_handle_hit(Shape* self, double x, double y) {
     double threshold = 10.0; // how much distance on each side of the vector
 
-    double dx = self->points[0].x - x;
-    double dy = self->points[0].y - y;
-    double len_sq = dx * dx + dy * dy;
+    for(int i = 0; i < 2; i++) {
+        double dx = self->points[i].x - x;
+        double dy = self->points[i].y - y;
+        double len_sq = dx*dx + dy*dy;
 
-    if(len_sq <= threshold*threshold) {
-        self->dragging_point = 0;
-        return true;
+        if(len_sq <= threshold*threshold) {
+            self->dragging_point_index = 1;
+            return true;
+        }
     }
-
-    dx = self->points[1].x - x;
-    dy = self->points[1].y - y;
-    len_sq = dx * dx + dy * dy;
-
-    if(len_sq <= threshold*threshold) {
-        self->dragging_point = 1;
-        return true;
-    }
-
     return false;
 }
-
 
 Shape *arrow_new(Point start, Point end) {
     Shape* self = shape_new();
@@ -112,7 +100,7 @@ Shape *arrow_new(Point start, Point end) {
     }
 
     self->type = SHAPE_TYPE_ARROW;
-    self->on_draw = arrow_on_draw;
+    self->draw = arrow_draw;
     self->is_hit = arrow_is_hit;
     self->is_handle_hit = arrow_is_handle_hit;
     self->points[0] = start;
@@ -121,10 +109,5 @@ Shape *arrow_new(Point start, Point end) {
     self->color = (RGBA){ 0.8784, 0.0157, 0.749, 1};
     self->color_shadow = (RGBA){ 0.1, 0.1, 0.1, 0.3};
 
-    self->free_data = arrow_free_data;
     return self;
-}
-
-void arrow_free_data(Shape* self) {
-    // NA
 }

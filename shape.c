@@ -1,10 +1,11 @@
+#include <math.h>
 #include "shape.h"
-
 
 Shape* shape_new() {
     Shape* s = calloc(1, sizeof(Shape));
     if(s != NULL) {
         s->type = SHAPE_TYPE_NONE;
+        s->free_data = shape_free_data;
     }
     return s;
 }
@@ -16,11 +17,18 @@ void shape_free(Shape* self) {
     }
 }
 
-void shape_draw_handle_at(Shape* /*self*/, Point p, cairo_t* cr, double scale) {
+void shape_free_data(Shape* self) {
+    if(self != NULL && self->data != NULL) {
+        free(self->data);
+        self->data = NULL;
+    }
+}
+
+void shape_draw_handle_at(Shape* /*self*/, Point p, cairo_t* cr, double /*scale*/) {
     cairo_save (cr);
 
-    double outer_diameter = 8.0 / scale; // inverted scale ( / ), always draw the control handle at the same size
-    double inner_diameter = 6.0 / scale; // inverted scale ( / ), always draw the control handle at the same size
+    double outer_diameter = 8.0;
+    double inner_diameter = outer_diameter - 2.0;
 
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
     cairo_arc (cr, p.x, p.y, outer_diameter, 0.0, 2 * M_PI);
